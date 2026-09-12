@@ -4,7 +4,7 @@
  *
  * A pin that only goes red when you delete the whole feature proves very little.
  * This reverts each decision INDIVIDUALLY — the smallest edit that reintroduces
- * the original defect or contradicts the product rule — and requires
+ * the original defect or contradicts the owner's ruling — and requires
  * src/firstRunExperience.test.mjs to go red for it. Every entry names what it
  * restores, so the count is reproducible rather than asserted in a commit
  * message.
@@ -13,7 +13,7 @@
  *
  * Every touched file is restored on exit, including on failure.
  *
- * NOTE: two mutations edit vite.config.js, and a running dev server watches that
+ * NOTE: two mutations edit server/providers/local.js, and a running dev server watches that
  * file and restarts on every write. Writes are therefore content-guarded below
  * so the file is touched exactly twice per mutation instead of on every
  * iteration — enough that a dev server survives, but expect it to restart. If
@@ -31,7 +31,7 @@ const FILES = {
   module: path.join(ROOT, 'src', 'firstRunExperience.js'),
   html: path.join(ROOT, 'index.html'),
   css: path.join(ROOT, 'style.css'),
-  vite: path.join(ROOT, 'vite.config.js'),
+  vite: path.join(ROOT, 'server/providers/local.js'),
   main: path.join(ROOT, 'src', 'main.js'),
   ui: path.join(ROOT, 'src', 'ui.js'),
   docs: path.join(ROOT, 'docs', 'CURRENT-STATE.md'),
@@ -39,7 +39,7 @@ const FILES = {
 
 /** @type {Array<{defect: string, file: keyof FILES, from: string, to: string}>} */
 const MUTATIONS = [
-  // ── Show policy (product decision: session-scoped dismiss vs durable checkbox) ──
+  // ── Show policy (owner ruling: session-scoped dismiss vs durable checkbox) ──
   {
     defect: 'dismissing writes the DURABLE key, so the launcher never returns',
     file: 'module',
@@ -254,7 +254,7 @@ const MUTATIONS = [
     to: '<small>Live earthquakes worldwide, straight from USGS</small>',
   },
   {
-    defect: "the final first-run line is quietly rewritten",
+    defect: "the owner-authored first-run line is quietly rewritten",
     file: 'html',
     from: 'It feels like a forbidden cockpit—then you realize the sources are public and the data is real.',
     to: "It feels like a forbidden cockpit. It isn't — every feed is public, and every contact is live.",

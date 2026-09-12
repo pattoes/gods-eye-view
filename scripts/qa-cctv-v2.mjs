@@ -106,7 +106,7 @@ const CHROME_EXECUTABLE_CANDIDATES = [
   // tile-gated drain budget under SwiftShader on 2026-07-30 — six
   // false-negative qa-cctv-v2 runs against a healthy build). A deterministic
   // pinned browser beats the newest one for regression harnesses.
-  (() => { try { return puppeteer.executablePath(); } catch { return null; } })(),
+  await puppeteer.executablePath().catch(() => null),
   '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
   '/Applications/Google Chrome Canary.app/Contents/MacOS/Google Chrome Canary',
   '/Applications/Chromium.app/Contents/MacOS/Chromium',
@@ -468,7 +468,7 @@ async function main() {
     record('pickFromRay fires exactly once for the activation (§9.1 probe)', pickDeltaActivation === 1,
       `Δ=${pickDeltaActivation} (camera=${activeId}, was=${activeIdBeforeActivation})`);
 
-    // Re-selecting the ALREADY-ACTIVE camera is a no-op (field test
+    // Re-selecting the ALREADY-ACTIVE camera is a no-op (owner field test
     // 2026-07-04: every click on the monitor plane picks its own camera, and
     // re-running activation rewrote the plane entity → visible flash). No new
     // probe, no geometry rewrite.

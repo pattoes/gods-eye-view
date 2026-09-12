@@ -1,6 +1,257 @@
 # God's Eye View Current State
 
+## Terrain, traffic, fire and bike-share provider modules
+
+Local composition now imports separate Node modules for Re:Earth heights,
+TomTom flow tiles, NASA FIRMS detections and GBFS station feeds. Existing routes,
+plugin order, server-key selection, validation, disk caches, budgets, retries
+and stale/error responses remain unchanged. Each has a Node-only package entry
+under `gods-eye-view/server/providers/`. Portable terrain mechanics, traffic tile
+math and GBFS source rules are available under `gods-eye-view/sources/`.
+The browser layers and their rendering remain in their existing modules.
+
+## Landmark annotation identity
+
+When a landmark geocode contains only address components, annotations retain
+its requested name for outline matching. A city or neighborhood address no
+longer replaces the landmark's identity. Without a canonical feature name,
+outline candidates must contain the geocoded anchor or closely match the
+requested name; otherwise the annotation stays at its geocoded point.
+Genuine feature-name components and existing administrative/monument matching
+retain their established behavior.
+
+## Satellite and launch provider modules
+
+`server/providers/space/` owns the CelesTrak TLE and Launch Library 2 Node
+proxies. Their routes, six-hour/15-minute caches, disk storage, stale fallback,
+request coalescing and optional LL2 server token retain existing behavior.
+The Node-only `gods-eye-view/server/providers/space` export supplies factories;
+`sources/space` supplies fixed upstream URL builders with no I/O or environment
+access. Callers retain validation, transport and response policy.
+
+## Build configuration and local provider boundaries
+
+`vite.config.js` delegates to `server/standalone/vite.config.js`, which loads
+this checkout's environment and constructs the local providers in their existing
+order. `server/providers/local.js` holds the existing middleware and process
+state; its named exports remain available through the root compatibility entry.
+Provider URLs, key selection, cache behavior, setup restrictions and routes are
+unchanged. Individual provider families remain to be split into smaller modules.
+
+`gods-eye-view/build/vite` is a Node-only export for explicit browser build
+settings: Cesium assets, caller-supplied plugins, browser key defines, server
+binding and document/credential protections. It never reads an environment file
+or constructs providers. The standalone caller owns those choices.
+
+Browser startup now lives in `src/standalone/`. That directory contains only
+browser code; Node configuration remains under `server/`. Application lifecycle
+and viewer export paths are unchanged.
+
+## Application startup and shutdown
+
+The standalone entry now composes scene setup, controls, layer registration and
+tools through the reusable application lifecycle. Map defaults, layer order,
+share restoration, voice setup and the running debug handle retain their behavior.
+The welcome card still waits for restoration and the loading-cover transition.
+
+Startup failure cleans up acquired resources. Explicit application destruction
+aborts construction, cancels pending playback/annotations and delayed welcome UI,
+then releases controls, layers and the viewer. Destruction is terminal; the
+standalone page must be reloaded to start again. The exported lifecycle and viewer
+helpers do not import the standalone entry or discover configuration. See
+[application construction](APPLICATION.md).
+
+## Scoped formatting and package checks
+
+`npm run format` and `npm run format:check` operate on the explicit adopted-file
+list. `npm run check:boundaries` checks the dependency graph of all
+current package exports in their declared browser or Node runtime; infrastructure owns its three implementation modules
+and takes Cesium from the consumer. CI runs both checks on Linux and Windows.
+The standalone app, layer behavior and public export paths remain unchanged.
+See [component ownership and adoption](CODE-BOUNDARIES.md).
+
+## Google browser and server keys
+
+Local Places nearby/text search and the CCTV Street View fallback prefer
+`GOOGLE_MAPS_SERVER_API_KEY`, falling back to `GOOGLE_MAPS_API_KEY` when the
+server key is blank or absent. Only the browser key is injected into client
+code. Both are optional and configured in the same ignored root `.env`, or
+Pinokio's ignored `pinokio/ENVIRONMENT`, through Provider Settings or manual
+editing. `.env.example` and `pinokio/_ENVIRONMENT` document the two entries.
+The Street View headings tool uses the same server-first selection after
+resolving environment overrides per variable; its explicit `--key` wins.
+
+
+## Infrastructure marker visibility
+
+Datacenter/dam registration uses fresh reusable factories with the application's
+existing context, overlay and render functions. The scoped package exports do
+not import standalone application globals; see
+[the infrastructure interface](INFRASTRUCTURE-LAYERS.md) for lifecycle and asset
+requirements.
+
+Local GeoJSON layers coalesce concurrent enables into one load. Disabling while
+loading keeps the result hidden; destruction aborts the fetch and rejects late
+parse/add results. Destruction and failed setup remove owned context records,
+so replacing a layer cannot retain stale entities or listeners.
+
+Datacenters and dams retain their full datasets while limiting active marker
+stems per layer: 80 at camera heights of 3,000 km or above, 200 from 200 km,
+and 420 below 200 km. Selection favors existing label priority and nearby
+features, retains stable choices across small camera movements, and refreshes
+during continuous motion. Disable/re-enable resets selection cleanly.
+Close-up stem sizing uses camera-to-feature distance without a 5 km minimum.
+Unchanged overlay entries do not request another frame; moved positions,
+changed membership and re-enabling still publish. Ground sampling waits for
+visible globe tiles to settle and uses valid loaded terrain as a floor while
+retaining rooftop and below-sea-level elevations. A hidden globe does not
+constrain photoreal geometry, and retry work remains bounded. Already sampled
+nearby markers follow higher settled terrain on existing bounded walks, without
+additional GPU samples or timers, when close-up tile detail refines the floor.
+The submarine-cable renderer is unchanged. These limits bound active stem work;
+they do not reduce the materialized entity count or establish an FPS gain.
+
+## Keyboard interaction and focus
+
+- Enter on the map-source disclosure opens immediately. A short Space press
+  opens it on key release. Either route focuses the selected source once visible;
+  a bounded retry handles delayed opening transitions, and closing the tray or
+  moving focus elsewhere cancels the handoff.
+- Keyboard focus rings are a global interface state and stay visible when a
+  button is active or selected. Visual Styles, Location suboptions, Context and
+  mission actions, Cockpit utilities, native fields, and sliders use the same
+  visible-ring contract.
+- A short Space press on a focused control keeps its native key-release action.
+  If it remains held for 500 ms, focus is checked again, the control is blurred,
+  and push-to-talk starts; releasing a claimed hold cannot activate the old
+  control. The same hold works on the map and page background. Text-entry
+  controls remain protected.
+- The Location disclosure is reachable with Tab or Shift+Tab and shows a
+  keyboard focus ring. Its city, point-of-interest, search-toggle, and search
+  field controls show inset rings, including selected items. Enter toggles its
+  tray immediately, while Space does so on release; either route makes the revealed controls immediately reachable by Tab;
+  Escape closes it and clears any unfinished search. Escape from a tray control
+  returns focus to the disclosure; Escape on the disclosure clears focus after closing.
+- Data Layers ON/OFF buttons show a visible keyboard focus ring without
+  changing their enabled state or feed-status presentation.
+- Display controls and shader-parameter sliders show keyboard focus in both
+  the map panel and Cockpit Display. Arrow keys retain native range adjustment.
+  The enabled CCTV camera dropdown shows keyboard focus as well.
+- Tab reaches both Contacts and Space Missions in sequence in every Context
+  state. Left/Right arrows also switch them; the focused tab has a distinct ring
+  even when selected.
+- Keyboard focus on a Space Missions roster item uses the same temporary globe
+  rotation and mission-marker highlight as pointer hover. Focus alone does not
+  select the mission; Enter or Space performs selection. Keyboard and pointer
+  preview ownership remain independent when the pointer is parked over the list.
+- Radio power controls in the full, compact, and Cockpit surfaces, Search Nearby
+  Sites, and Clear Selected Layers remain focusable while lifecycle work is in
+  progress. They announce busy/disabled semantics and ignore repeat activation
+  until the operation settles, so async work cannot drop the keyboard ring.
+- Normal-mode Contacts results preserve the focused action or contact by stable
+  identity while live counts, distance order, and pages refresh. If that contact
+  departs or rotates off the visible page, focus moves to a stable continuation
+  point on the named explanatory note at the end of the list and remains there
+  through later repaints. The following Tab proceeds beyond the results instead
+  of restarting at Contacts or silently focusing another contact.
+- Cockpit Live Signals updates existing contact buttons without replacing or
+  disconnecting the focused one. Tab can continue through the briefing footer
+  to Display and Radio. If the focused contact leaves the list, focus moves
+  once to the current briefing tab; later refreshes do not reclaim it.
+- Cockpit-only Display and Radio launcher icons show a complete inset keyboard
+  ring in their collapsed and expanded states.
+- Escape collapses the nearest expanded panel containing focus before any
+  containing panel acts. Closing from panel content returns focus to that panel's
+  disclosure; closing from the disclosure itself clears focus so the collapsed
+  button does not retain its ring. This includes standard panels, nested
+  Parameters, Cockpit Contact and Live Signals, and Cockpit Display/Radio utilities.
+- The required bottom-left Data attribution control is a named popup button in
+  the Tab order. Enter opens immediately and Space opens on release, then the
+  credit lightbox focuses Close;
+  Close, Escape, or backdrop dismissal restores focus to Data attribution.
+
+## CCTV launcher and proxy failure responses
+
+`scripts/dev-cctv.sh` delegates startup to `scripts/dev-fresh.sh`. It retains
+its Austin source file, Austin preference, 36-camera Austin limit, and 48-camera
+total limit, with environment overrides. Keys are optional; credential loading
+and names-only provider provenance follow the normal launcher. The default
+binding is localhost. An explicit `HOST=0.0.0.0` uses the same LAN warning as
+normal startup.
+
+The CelesTrak, Launch Library, terrain-height, and ADSBDB middleware return
+fixed messages for unexpected failures. Launch Library retains its upstream
+HTTP failure status and no-store policy but does not forward the upstream body.
+Existing successful, in-flight, missing-data, and stale-cache behavior remains
+in place. Failure diagnostics identify the service and, for Launch Library,
+HTTP status without printing raw exception text or upstream bodies.
+
+## Map Source keyboard focus
+
+Keyboard opening focuses the selected map-source tile, falling back to the first
+only when no source is selected. A bounded retry handles delayed tray visibility.
+Moving focus away, pointer interaction, closing the tray, or disposing the UI
+cancels pending work; a later reopening cannot inherit an old focus request.
+
+## September 8, 2026
+
+Earthquake refreshes validate the complete feed and construct replacement entities before clearing the previous snapshot. Malformed rows and duplicate rendered IDs retain the last good entities, overlays, count and timestamp and report a malformed response; unknown magnitude is excluded from M2.5+ rendering.
+
+Non-object or array-valued properties reject the response instead of being treated as an unknown magnitude.
+
+Launch payloads with missing records now say PAYLOAD DATA UNAVAILABLE. Missing names use Unnamed payload; absent or invalid mass stays unknown instead of appearing as 0 KG.
+
 Updated: August 24, 2026
+
+## Aircraft and vessel server modules
+
+Standalone aircraft routes now live in `server/providers/aircraft/`: OpenSky
+state vectors and regional fallback, adsb.lol military positions, ADSBDB
+enrichment and track backfill. Vessel routes and websocket/watchdog setup live
+in `server/providers/vessels/ais-live.js`; AIS records and recent tracks live
+in `ais-store.js`. Common response caps, request coalescing and query parsing
+have their own modules. `server/providers/local.js` composes these with the
+remaining providers and retains existing named compatibility exports.
+
+`gods-eye-view/server/providers/live` is a Node-only entry for the existing
+plugins and shared request helpers. Importing it starts no sockets or timers.
+The existing aircraft normalizer is separately available through the portable
+`gods-eye-view/sources/adsb-lol` export. Provider URLs, local credentials, cache
+policy, fallback behavior, response shapes and rendering remain unchanged.
+
+
+## Control names for assistive technology
+
+Scope, Bloom, Sharpen and location search have explicit accessible names.
+Generated style sliders use the same name as their visible parameter label.
+The first-run suppression checkbox keeps its native wrapping label, so its
+accessible name remains "Don't show this again". Control behavior is unchanged.
+
+## FIRMS source status
+
+The FIRMS proxy records source success after appending its rows. If aggregation
+throws, that source reports failure without a contradictory success entry.
+The existing per-record append continues to support large feeds; sequential
+fetching, trailing-24-hour filtering and partial-success caching are unchanged.
+
+## Installations and map-source guidance
+
+- On an uncached Overpass failure, mapped installations keep their existing
+  30–240 second retry backoff. The top status and Contacts row explain the
+  outage and scheduled countdown; an active retry says "Retrying mapped
+  sites" and successful recovery clears the previous error. Known upstream
+  rate limits, timeouts, and query failures are distinguished without exposing
+  raw server errors. Failures from other loading layers retain precedence.
+- Click a selected installation again or click elsewhere on the map to clear
+  its selection. Clearing the installation does not clear another layer's
+  newly selected contact, and refreshes do not revive the cleared site.
+- Installation ways and relations without an explicit center use the midpoint
+  of finite, ordered bounds spanning at most 10 degrees per axis. Explicit
+  coordinates and centers retain precedence; invalid bounds are dropped.
+- Visual-style buttons describe their simulated effects on hover. Unavailable
+  map-source tooltips and toasts share provider guidance: missing credentials
+  point to Provider Settings, while a configured Google 3D route that fails
+  points to restrictions, quota, or connectivity. These hints do not expose keys.
 
 > **2026-08-23 — first-run mission launcher** (`src/firstRunExperience.js`,
 > `#first-run-launcher`, styles at the tail of `style.css`). After startup
@@ -664,7 +915,7 @@ This is the current runtime/source-of-truth snapshot for the project.
 >   shared Parameters surface moves into Cockpit Display for the session and
 >   returns on exit, with slider values contained by the panel at its supported widths;
 >   the bottom Visual Presets tray owns the MAP SOURCE label, centered status,
->   and four-tile source row. Its compact wing is a keyboard disclosure:
+>   and five-tile source row. Its compact wing is a keyboard disclosure:
 >   Enter/Space opens and focuses Map Source, Escape closes and returns focus,
 >   and unavailable sources remain tabbable with their reason exposed. Expanded left-panel
 >   headers use the same container-owned background treatment without changing
@@ -729,7 +980,7 @@ This is the current runtime/source-of-truth snapshot for the project.
 >   corridor. Layer toggles stay live from there, and collapsing returns the
 >   plain launcher. The map-only Clear, Share, and Reset Globe actions are hidden
 >   for the duration of Cockpit, both as a group and as individual controls.
->   It uses the `radar` symbol and provides roving keyboard tab navigation. Its action row
+>   It uses the `radar` symbol; both tabs are reachable with Tab and Left/Right arrows switch between them. Its action row
 >   places the single Cockpit entry before Search Nearby Sites. Cockpit removes
 >   the duplicate floating map entry and topline exit; the bottom-center
 >   `EXIT COCKPIT` control (offset downward by a `-95px` bottom margin) plus `Escape`/`C` own exit, with entry/exit focus
@@ -1665,9 +1916,11 @@ preserves object identity for an idempotent repeat of the same generation, and
 degrades without replacement if a fresh response presents an older generation.
 Snapshot records mark community metadata as untrusted, and Radio tool results
 omit station names so directory text never becomes model instruction context.
-One bounded country parser maps recognized ISO codes and English/common names
-through proxy metadata and final station selection, while malformed, non-ISO,
-control-containing, and oversized inputs fail closed. Literal or resolved
+One bounded country parser maps recognized ISO codes and English/common names —
+including widely used exonyms the Intl display label omits (Turkey, Holland,
+Burma, and similar) — through proxy metadata and final station selection, while
+malformed, non-ISO, control-containing, ambiguous, and oversized inputs fail
+closed. Literal or resolved
 non-global IPv4/IPv6 targets are refused. Destroy fully releases the Radio audio
 session, voice ducking/restoration, request state, filter, selection, volume,
 accepted snapshot, and feed telemetry before re-initialization; monotonic
@@ -2006,6 +2259,12 @@ silently demoting every later lookup for the session.
 - **Track trails**: server accumulates per-MMSI ring buffers (`/api/ais-live/track?mmsi=`, Float32+Uint32, 64 samples, 30s/25m thinning); aircraft backfill proxies `/api/opensky-track` (OAuth, own credit bucket) and `/api/adsblol/trace` (tar1090 readsb, ~24h history, ODbL — credit adsb.lol).
 - Shared `src/data/pickRegistry.js` stops the two flight layers' click handlers from fighting over the camera.
 
+### Overpass proxy mirror rotation (September 2026)
+
+- `/api/overpass` fans out across four public mirrors. `overpassPayloadIsData()` governs cache reads, writes, and stale fallback: only a 2xx that is neither rate-limited nor a body-level runtime error qualifies. Previously stored refusals are ignored on both fresh and stale reads, so upgrading does not require manually clearing the disk cache.
+- HTTP refusals such as 406 now rotate alongside the existing network, rate-limit, and runtime-error cases. A refusal from one mirror no longer prevents reaching healthy alternatives or persists under the seven-day road/month-long boundary cache TTLs. Concurrent identical queries share one mirror sequence; if it fails, both the initiating and joined callers can use the same last-good data.
+- A refusal every mirror agrees on is still reported with the first mirror's status and body, so a genuinely malformed query says what upstream said — but only after every mirror has had the chance to answer it. `fetchOverpassPayload` takes injectable endpoints and fetch so the rotation is tested without a live mirror (`src/overpassProxy.test.mjs`).
+
 ### Share-link v2 layer state (August 2026)
 
 - Generated share links use a deterministic v2 hash. Existing camera, visual,
@@ -2177,11 +2436,11 @@ silently demoting every later lookup for the session.
 
 ### Map Stack Switcher (June 2026)
 
-- `src/mapStackController.js` switches between Google Photorealistic 3D (`photoreal`, default), Bing Aerial / Aerial-with-Labels via Cesium ion world imagery (require `CESIUM_ION_TOKEN`), and OSM tile fallback. Bing Road is **retired**: it is gone from `MAP_STACKS`, from the `set_map_stack` enum, and from the voice aliases (road phrasings now resolve to OSM, the one shipped road basemap). An old `map=bing-road` link is simply an unknown id and takes `setStack()`'s existing photoreal fallback with the Google 3D tile lit — pinned live in `scripts/qa-map-source-tray.mjs`.
-- The bottom Visual Presets tray presents a **four-tile MAP SOURCE row** (`#map-stack-chips`, `src/mapStackChips.js`): Google 3D, Bing Aerial, Bing Labels, and OSM. The duplicate left `#stack-panel` is retired. The four tiles share one row on desktop and two rows on narrow screens, carry `aria-pressed` on the active source, and remain keyboard-reachable with a visible focus outline.
+- `src/mapStackController.js` switches between Google Photorealistic 3D (`photoreal`, the default when a Google or ion key is present), keyless Esri World Imagery (the zero-key default landing, with keyless terrain), Bing Aerial / Aerial-with-Labels via Cesium ion world imagery (require `CESIUM_ION_TOKEN`), and OSM tile fallback. Bing Road is **retired**: it is gone from `MAP_STACKS`, from the `set_map_stack` enum, and from the voice aliases (road phrasings now resolve to OSM, the one shipped road basemap). An old `map=bing-road` link is simply an unknown id and takes `setStack()`'s existing photoreal fallback with the Google 3D tile lit — pinned live in `scripts/qa-map-source-tray.mjs`.
+- The bottom Visual Presets tray presents a **five-tile MAP SOURCE row** (`#map-stack-chips`, `src/mapStackChips.js`): Google 3D, Esri Satellite, Bing Aerial, Bing Labels, and OSM. The duplicate left `#stack-panel` is retired. The five tiles share one row on desktop and two rows on narrow screens, carry `aria-pressed` on the active source, and remain keyboard-reachable with a visible focus outline.
 - The lit tile follows controller state, not the click: a rejected switch (no ion token) or a superseded one (rapid A→B) leaves the genuinely active source lit, and the tray heading keeps its short-label status readout (`...` while switching, amber on `lastError`).
 - Ion stacks remain visible and keyboard-focusable when no ion token is configured, but expose `aria-disabled="true"` and do not switch. Their accessible label and tooltip quote `getStacks().unavailableReason` — the same string `setStack()` puts in the toast. OSM works keyless. The `ION` badge is gated on the stack's own `requiresIon`, so a `photoreal` chip unavailable because the Google tileset failed says so instead of falsely demanding an ion token.
-- Stack choice participates in share links (`src/sharelink.js`) and falls back to OSM when Google 3D tiles fail to load. Share-link restore, the `set_map_stack` voice tool, and the chip row all land on the same `_setMapStack()` path.
+- Stack choice participates in share links (`src/sharelink.js`) and falls back to the best available stack when the requested one is unavailable (keyless boots land on Esri; OSM takes over automatically if Esri is unreachable). Share-link restore, the `set_map_stack` voice tool, and the chip row all land on the same `_setMapStack()` path.
 
 ### Voice Map Whiteboard / Annotations (June 2026)
 
@@ -2253,6 +2512,10 @@ silently demoting every later lookup for the session.
 ## Auth + Launch
 
 - Recommended launcher: `./scripts/dev-fresh.sh` (also: `dev-secure.sh` for stricter bindings, `dev-cctv.sh` for CCTV source-pack tuning)
+- A successful Pinokio install writes the owner-only `pinokio/.installed`
+  marker. The nested launcher menu resolves that marker from its own directory:
+  an absent marker exposes Install, a present marker exposes Start, and a
+  running server with a captured ready URL exposes Open God's Eye View.
 - Build gate: `npm run build`
 - Network access: local-only by default (`HOST=localhost` in dev-fresh.sh); LAN is an explicit opt-in via `HOST=0.0.0.0` (launcher prints a key-exposure warning + LAN URL; see SECURITY.md)
 - OpenSky default mode: OAuth (`OPENSKY_AUTH_MODE=oauth`; `anon` works without credentials)
@@ -2582,3 +2845,11 @@ Replay transport uses one Play/Pause toggle plus Cancel. During ascent only the 
 ## Maintenance Rule
 
 When runtime behavior or architecture changes, update this file in the same change set as code updates.
+
+## Dependency security baseline
+
+The lockfile uses DOMPurify 3.4.15, protobufjs 8.8.0, PostCSS 8.5.28, and
+nanoid 3.3.19. Cesium remains on 1.138.0. Browser QA uses Puppeteer 25.10.0;
+image-processing tools use Sharp 0.35.4. QA scripts await Puppeteer's asynchronous
+executable-path lookup before testing or passing the path to Chrome. Supported Node versions remain
+24.14.x and 26.x. Use `npm ci` to reproduce the checked-in dependency tree.

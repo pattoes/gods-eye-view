@@ -101,6 +101,7 @@ export function createAnnotationEngine({
 }) {
   /** @type {Map<string, object>} live annotations keyed by id */
   const annotations = new Map();
+  let destroyed = false;
   let tickHandle = null;
   let assistFlightUntil = 0; // camera-assist debounce (see ensureMarksVisible)
   // Generation token + in-flight fetch controllers guard against clear / new-topic
@@ -163,7 +164,7 @@ export function createAnnotationEngine({
    * reach — and the next annotate of the same geometry would then stack a fresh
    * mark over the orphan. remove() tolerates partial and absent state, so this
    * is safe to call unconditionally; it must never mask the original failure.
-   * (second review)
+   * (review round 2)
    * @param {object} anno
    * @returns {void}
    */
@@ -174,7 +175,7 @@ export function createAnnotationEngine({
   }
 
   function ensureTicking() {
-    if (tickHandle != null) return;
+    if (destroyed || tickHandle != null) return;
     const tick = () => {
       const now = performance.now();
       let changed = false;
@@ -222,6 +223,7 @@ export function createAnnotationEngine({
    * @returns {Promise<{ok, drawn, failed, ids, results}>}
    */
   async function annotate(requests, opts = {}) {
+    if (destroyed) return { ok: false, drawn: 0, failed: 0, ids: [], results: [], error: 'destroyed' };
     const list = Array.isArray(requests) ? requests : [requests];
     if (opts.clearPrevious) clear(); // bumps generation + aborts older pending work
 
@@ -865,6 +867,17 @@ export function createAnnotationEngine({
   const engine = {
     annotate,
     clear,
+    destroy() {
+      if (destroyed) return;
+      destroyed = true;
+      try { clear(); } finally {
+        if (tickHandle != null) cancelAnimationFrame(tickHandle);
+        tickHandle = null;
+        outlineListeners.clear();
+        releaseContinuousRender('annotations');
+        renderer.destroy();
+      }
+    },
     fadeOutAll,
     count: () => annotations.size,
     list: () => Array.from(annotations.values()),
@@ -875,7 +888,7 @@ export function createAnnotationEngine({
      * upgrade task, AFTER the mark was mutated in place. Returns an unsubscribe fn.
      */
     onOutlineEvent(listener) {
-      if (typeof listener !== 'function') return () => {};
+      if (destroyed || typeof listener !== 'function') return () => {};
       outlineListeners.add(listener);
       return () => outlineListeners.delete(listener);
     },
@@ -901,16 +914,22 @@ export function createAnnotationEngine({
     async tour() {
       clear();
       flyTo({ lon: -122.4486, lat: 37.7960, height: 520, heading: 0, pitch: -26, duration: 3 });
+      if (destroyed) return { ok: false };
       await wait(3200);
       await annotate([{ type: 'highlight', target: 'Palace of Fine Arts, San Francisco', label: 'Palace of Fine Arts', color: 'amber' }], { persist: true });
+      if (destroyed) return { ok: false };
       await wait(2600);
       await annotate([{ type: 'arrow', target: 'Palace of Fine Arts, San Francisco', toTarget: 'Marina Green, San Francisco', label: 'next to the Marina', color: 'cyan' }], { persist: true });
+      if (destroyed) return { ok: false };
       await wait(2600);
       flyTo({ lon: -122.4545, lat: 37.7880, height: 1500, heading: 18, pitch: -32, duration: 3 });
+      if (destroyed) return { ok: false };
       await wait(3200);
       await annotate([{ type: 'area', target: 'Presidio of San Francisco', label: 'The Presidio — a former Army base', color: 'green', footprint: true }], { persist: true });
+      if (destroyed) return { ok: false };
       await wait(2800);
       await annotate([{ type: 'pin', target: 'Letterman Digital Arts Center, San Francisco', label: 'ILM / Lucasfilm', color: 'red' }], { persist: true });
+      if (destroyed) return { ok: false };
       await wait(2600);
       await annotate([{ type: 'route', color: 'amber', label: 'Crissy Field shoreline', points: [
         { target: 'Palace of Fine Arts, San Francisco' },
@@ -922,6 +941,7 @@ export function createAnnotationEngine({
   };
 
   function flyTo({ lon, lat, height, heading = 0, pitch = -30, duration = 2.5 }) {
+    if (destroyed) return;
     try {
       viewer.camera.flyTo({
         destination: Cesium.Cartesian3.fromDegrees(lon, lat, height),
@@ -1027,7 +1047,7 @@ function pendingAnimation(anno, now) {
 // Region-scale viewports (a mountain range, sea, or desert can span thousands of km)
 // must not launch the assist flight to space: frameAnnotation flies at range × 2.4,
 // so this cap keeps the camera at ≈290 km — the same regional swath scale the
-// fly_to_location natural-region heuristic uses (field test 2026-07-23).
+// fly_to_location natural-region heuristic uses (owner field test 2026-07-23).
 const VIEWPORT_ASSIST_RANGE_CAP_M = 120000;
 
 /** flyTo range from a Places viewport box (low/high lat-lng corners), or null. */

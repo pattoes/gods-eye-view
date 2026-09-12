@@ -4,10 +4,10 @@
 > This is a **manual field-test scenario script** for the June-2026 whiteboard +
 > tracking work. The AUTOMATED gates live elsewhere: `npm test` (unit),
 > `npm run test:track` (tracking invariants), and the headless harnesses under
-> `scripts/qa-*.mjs` — see [docs/CURRENT-STATE.md](docs/CURRENT-STATE.md) for the full test surface.
+> `scripts/qa-*.mjs` — together these are the full automated test surface.
 
-This guide covers the hardened annotation and tracking behavior. Record a voice
-note + screenshots as you go; each scenario
+This guide covers the work hardened over **4 adversarial-review batches** on
+`feat/annotate-hybrid`. Record a voice note + screenshots as you go; each scenario
 lists what **✅ pass** looks like and (where it applies) the **❌ old bug** it replaces.
 
 ## Focus/horizon moving evidence
@@ -218,3 +218,16 @@ While recording, call out anything in these areas — this is the feedback I mos
 - **No planes:** OpenSky data may be momentarily sparse; scroll out or wait a poll cycle.
 - **No GEV MIC button / voice errors:** `OPENAI_API_KEY` didn't load — use the console API for
   the annotation tests and skip the voice-only ones (§2).
+
+
+## Browser harness renderers
+
+The first-run, view-target prewarm, cockpit-plates and floor-hold harnesses
+select Metal on macOS and SwiftShader on other platforms. Cockpit-plates also
+accepts `--swiftshader` on macOS; floor-hold retains `--angle=<backend>`.
+Floor-hold explicitly selects 2D aircraft mode because it measures billboard
+positions; the tracking suite covers the 3D handoff.
+Software runs validate their assertions but do not establish real-GPU visual
+correctness. Floor-hold retains both mesh and DEM checks: an unavailable mesh
+oracle fails the run even when the DEM check passes. Record the backend with
+any screenshots and run GPU visual checks separately when needed.

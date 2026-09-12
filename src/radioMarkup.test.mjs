@@ -8,7 +8,7 @@ const ui = readFileSync(new URL('./ui.js', import.meta.url), 'utf8');
 const radio = readFileSync(new URL('./data/radio.js', import.meta.url), 'utf8');
 const rocketLaunches = readFileSync(new URL('./data/rocketLaunches.js', import.meta.url), 'utf8');
 const realtime = readFileSync(new URL('./voice/gevRealtime.js', import.meta.url), 'utf8');
-const voice = readFileSync(new URL('../vite.config.js', import.meta.url), 'utf8');
+const voice = readFileSync(new URL('../server/providers/local.js', import.meta.url), 'utf8');
 const css = readFileSync(new URL('../style.css', import.meta.url), 'utf8');
 
 /** Parse the Realtime tool array out of the Vite config as real data. */
@@ -44,7 +44,7 @@ test('Realtime schema exposes the authoritative 28-tool inventory', () => {
 });
 
 test('the counting contract is stated in the Realtime instructions', () => {
-  // Product decision: "near" has one meaning per state, and every count names its
+  // Owner ruling: "near" has one meaning per state, and every count names its
   // scope. Instruction text is the only place the narration rules can live, so
   // it is pinned — a silent trim here is a silent behaviour change.
   const start = voice.indexOf("'COUNTING CONTRACT");

@@ -28,7 +28,7 @@ const DEFERRED_DEPENDENCIES = ['ais-live-vessels', 'military-installations'];
 const DEPENDENCIES = [...AIRCRAFT_DEPENDENCIES, ...DEFERRED_DEPENDENCIES];
 const AWARENESS_REFRESH_MS = 750;
 /** @constant {number} Refresh cadence while the camera pose is CHANGING.
- *  Field test 2026-08-18: the Contacts direction arrows and card readouts
+ *  Owner playtest 2026-08-18: the Contacts direction arrows and card readouts
  *  "feel sluggish when you look around" — at the parked 750 ms cadence the
  *  arrows lag the view by up to three quarters of a second. */
 const AWARENESS_MOTION_REFRESH_MS = 175;
@@ -292,9 +292,9 @@ function sourceState(layerId) {
   //     however long the fetch takes. Confirmed live: a held 17 s first fetch
   //     read `enabling` across 34 samples with the panel non-numeric throughout,
   //     and a failing one settled to `enabled` with status 'unavailable'. Its
-  //     getStats() has no `loading` status to offer in any case —
+  //     getStats() also reports loading while a request is in progress —
   //     setInstallationStatus is only ever called with
-  //     zoom-in/ready/stale/empty/unavailable.
+  //     loading/zoom-in/ready/stale/empty/unavailable.
   //   - ais-live-vessels is what the predicate below is FOR. Its enable() and
   //     update() both resolve as soon as the first /api/ais-live poll answers,
   //     so the lifecycle settles to `enabled` — but until the server-side socket
@@ -348,7 +348,9 @@ function isSame(subject, item, prefix, key) {
  */
 export function summarizeInstallationViewport(items, source) {
   const summary = summarizeAwarenessCohortForNavigation(items, source);
-  if (summary.count === null) return summary;
+  if (summary.count === null) return source.stats?.statusMessage
+    ? { ...summary, reason: source.stats.statusMessage }
+    : summary;
   return {
     ...summary,
     reason: summary.count
@@ -444,7 +446,7 @@ export function buildAwarenessContextSnapshot(results, navigation = {}, { subjec
  * They used to be separate. The panel read live billboard positions through
  * `getNearby` with a 20 000 cap; the analyst re-derived its own answer from
  * last-fix coordinates over a 2 000-record slice. Same question, same centre,
- * two numbers — and in the live trial the spoken answer (15) and the panel
+ * two numbers — and in the owner's trial the spoken answer (15) and the panel
  * (111) disagreed badly enough that the model narrated the difference away.
  * Routing both through here makes them the same number BY CONSTRUCTION, so
  * they cannot drift again.
@@ -980,6 +982,43 @@ function navigationState() {
   };
 }
 
+/** Stable identity for a delegated Contacts-panel button across live repaints. */
+export function awarenessPanelControlKey(element) {
+  const control = element?.closest?.(
+    'button[data-awareness-action], button[data-awareness-layer][data-awareness-id]',
+  );
+  if (!control) return null;
+  if (control.dataset.awarenessAction) return `action:${control.dataset.awarenessAction}`;
+  return `target:${control.dataset.awarenessLayer}:${control.dataset.awarenessId}`;
+}
+
+/** Capture stable identity so a live repaint can restore only the same control. */
+export function captureAwarenessPanelFocus(panel, activeElement = document.activeElement) {
+  if (!panel?.contains?.(activeElement)) return null;
+  if (activeElement?.matches?.('[data-awareness-focus-continuation]')) {
+    return { key: 'continuation' };
+  }
+  const key = awarenessPanelControlKey(activeElement);
+  if (!key) return null;
+  return { key };
+}
+
+/** Restore the same control, or continue beyond the list when it is no longer rendered. */
+export function restoreAwarenessPanelFocus(panel, snapshot) {
+  if (!panel || !snapshot) return null;
+  const continuation = panel.querySelector('[data-awareness-focus-continuation]');
+  const controls = [...panel.querySelectorAll(
+    'button[data-awareness-action], button[data-awareness-layer][data-awareness-id]',
+  )].filter((control) => !control.disabled);
+  const retained = snapshot.key === 'continuation'
+    ? continuation
+    : controls.find((control) => awarenessPanelControlKey(control) === snapshot.key);
+  const target = retained
+    || continuation;
+  target?.focus?.({ preventScroll: true });
+  return target || null;
+}
+
 function escapeHtml(value) {
   return String(value ?? '').replace(/[&<>'"]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[char]);
 }
@@ -991,11 +1030,13 @@ function renderResults() {
   const markup = `<div class="military-awareness-subject">${escapeHtml(subject.label)} · ${formatAwarenessDistance(AWARENESS_RADIUS_M)} FLIGHT / VESSEL WINDOW</div>
     ${navigationControlsHtml()}
     ${cohorts.map(rowHtml).join('')}
-    <p class="military-awareness-note">Open-source mapped/observed context. Missing broadcasts, unloaded map areas, or unmapped sites are not evidence of absence.</p>`;
+    <p class="military-awareness-note" tabindex="-1" data-awareness-focus-continuation>Open-source mapped/observed context. Missing broadcasts, unloaded map areas, or unmapped sites are not evidence of absence.</p>`;
   panel.hidden = false;
   if (state.panelMarkup !== markup) {
+    const focusSnapshot = captureAwarenessPanelFocus(panel);
     panel.innerHTML = markup;
     state.panelMarkup = markup;
+    restoreAwarenessPanelFocus(panel, focusSnapshot);
   }
 }
 

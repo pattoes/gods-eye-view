@@ -270,7 +270,7 @@ export async function resolveAnnotationTarget({
   const baseScope = refineScope(scopeFromTypes(geocodeTypes), entityKind);
   // Point-like targets (monuments/statues/memorials/…) resolve POINT-FIRST: only an
   // (almost) exactly-named, monument-scale polygon may replace the point; a nearby polygon
-  // sharing locality words must not.
+  // sharing locality words must not (docs/field-test-rootcause-2026-06-30.md §1).
   const pointLike = isPointLikeTarget(target, entityKind, placeTypes, labelHint);
   // Grounds/compound asks (target OR label wording, or entityKind fact) go outline-first:
   // they reach the real enclosing-polygon sweep even under `around_the_thing` phrasing.
@@ -306,7 +306,7 @@ export async function resolveAnnotationTarget({
     // BYPASSES the compound/building scope caps and the centroid drift bound
     // below: the region IS the asked scope ("outline the Alps"), the 60 km²
     // compound cap is for campuses (the meadow bug,
-    // the resolver's verified live-data contract), and a continental ring's
+    // docs/voice-engine-evaluation-2026-07-23.md §3), and a continental ring's
     // centroid legitimately sits far from any anchor. Admin and street scopes
     // are excluded — "Texas" must keep resolving as an admin boundary.
     if (!isAdmin && scope !== 'street' && !around) {
@@ -343,7 +343,7 @@ export async function resolveAnnotationTarget({
       // FIRST: a bundled neighborhood polygon (reliable, deterministic, OFFLINE — no live
       // Overpass). Covered neighborhoods (e.g. SF: Chinatown/Marina/Mission/Presidio)
       // resolve here instantly to a REAL boundary, sidestepping the slow/flaky live-Overpass
-      // path that times out and falls back to points.
+      // path that times out and falls back to points (see docs/field-test-2-analysis.md).
       const ext = await lookupNeighborhoodRing(lat, lon, matchName);
       if (ext) fp = { ring: ext.ring, kind: 'area', heightM: null };
       // Else fall through to the OSM admin/place → named-landuse → synthesis ladder. Each
@@ -395,12 +395,16 @@ export async function resolveAnnotationTarget({
       // (which classifies building-vs-area and stitches compound multipolygons).
       // Point-like targets use the strict 'point' selection: exact-ish name + monument
       // scale, else no polygon at all — the honest point beats a locality-word match.
-      fp = await fetchFootprint(lat, lon, matchName, scope, signal, pointLike ? 'point' : 'loose');
+      // Without a feature-name component, match the original ask and require
+      // identity or containment before replacing its geocoded anchor.
+      const footprintMode = pointLike ? 'point'
+        : (fromGeocode && !usablePrimary ? 'anchored' : 'loose');
+      fp = await fetchFootprint(lat, lon, matchName, scope, signal, footprintMode);
       // A "grounds/compound/campus" phrase ("Texas Capitol grounds") names an ENCLOSING area. The
       // primary footprint above returns the BUILDING (the dome) or null — neither is the grounds. The
       // real enclosing polygon (e.g. "Capitol Square", leisure=park) IS in OSM but only surfaces via a
       // radius sweep for NAMED non-building polygons, taking the SMALLEST that geometrically contains
-      // the point. So when a grounds-like
+      // the point (research docs/compound-containment-research.md §1.4–1.5). So when a grounds-like
       // query produced a building or no polygon, prefer that REAL enclosing outline; fall to a
       // synthesized disc only when OSM DEFINITIVELY has none.
       if (groundsLike && (fp === null || fp?.kind === 'building')) {
@@ -522,7 +526,7 @@ const MIN_DRIFT_FLOOR_KM = 50;
 // cover a large compound's monuments seen from an oblique view (Text Search is biased to 6 km here).
 const PLACES_MAX_DISTANCE_M = 8000;
 
-// Synthesis radii (m) for cases where OSM has only
+// Synthesis radii (m) per osm-place-resolution-research.md §8.5. Used when OSM has only
 // a label point (most US neighborhoods) or the user asks for the area AROUND a landmark.
 const NEIGHBORHOOD_RADIUS_M = 750; // urban-neighborhood blob (600–900 m band)
 const AROUND_LANDMARK_RADIUS_M = 400; // "the area around X" — a few blocks (300–500 m)
@@ -715,9 +719,9 @@ async function placesTextSearch(query, centerLat, centerLon, radiusM, signal) {
 /**
  * The canonical name of the geocoded feature: the address component whose own
  * types match the result's feature type (e.g. the `neighborhood` component for a
- * neighborhood result), falling back to the first component / leading label
- * token. This is the user's INTENT, stripped of the trailing admin context that
- * makes the raw utterance match the wrong-scope OSM feature.
+ * neighborhood result). Address-only responses may identify a landmark's city
+ * without naming the landmark itself. Return null in that case so the caller
+ * keeps the requested name instead of matching a nearby building in that city.
  */
 function extractPrimaryName(result) {
   const resultTypes = new Set((result.types || []).map((t) => String(t).toLowerCase()));
@@ -726,8 +730,7 @@ function extractPrimaryName(result) {
     const ct = (c.types || []).map((t) => String(t).toLowerCase());
     if (ct.some((t) => t !== 'political' && resultTypes.has(t))) return c.long_name;
   }
-  if (comps[0]?.long_name) return comps[0].long_name;
-  return String(result.formatted_address || '').split(',')[0].trim() || null;
+  return null;
 }
 
 /**
@@ -1222,6 +1225,7 @@ function perpDistance(p, a, b) {
  *   'loose'  — default word-overlap scoring (generic POIs/compounds).
  *   'strict' — named, non-building, district-sized areas only (neighborhood fallback).
  *   'point'  — point-like targets: (almost) exactly-named, monument-scale polygons only.
+ *   'anchored' — address-only geocodes: require name identity or anchor containment.
  *
  * @returns {Promise<null | { ring: Array<[number,number]>, kind: 'building'|'area', heightM: number|null }>}
  */
@@ -1281,7 +1285,7 @@ const ENCLOSING_RADIUS_M = 600; // sweep this far for an enclosing named non-bui
  * leisure=park). OSM has no deterministic "parent polygon" call and the canonical
  * compound name is rarely what the user utters ("grounds", not "Capitol Square"),
  * so SELECTION is by containment → smallest area, with a name-match only as a
- * tiebreak BONUS (never a filter).
+ * tiebreak BONUS (never a filter). See docs/compound-containment-research.md §1.4–1.5.
  *
  * Modeled on fetchLocalMonument: a 12 s fail-fast (an enrichment, not worth blocking
  * narration — and narration no longer waits on it since outlines went progressive, so
@@ -1487,7 +1491,7 @@ const POINTLIKE_AREA_CAP_M2 = 60_000;
 
 /**
  * Pick the best OSM polygon for a query from raw Overpass elements. `mode` selects the
- * acceptance contract ('loose' | 'strict' | 'point' — see fetchFootprint). Exported for
+ * acceptance contract ('loose' | 'strict' | 'point' | 'anchored' — see fetchFootprint). Exported for
  * the unit tests, which pin the mode contracts with fixtures captured from live data.
  */
 export function selectFootprint(elements, targetLat, targetLon, query, mode = 'loose') {
@@ -1539,6 +1543,10 @@ export function selectFootprint(elements, targetLat, targetLon, query, mode = 'l
     }
 
     const contains = pointInPolygon(targetLon, targetLat, coords);
+    if (mode === 'anchored' && !contains) {
+      const intentCoverage = queryWords.size ? nameOverlap / queryWords.size : 0;
+      if (!named || intentCoverage < 0.5 || completeness < 0.6) continue;
+    }
     const centroid = ringCentroid(coords.map((p) => [p.lon, p.lat]));
     const distanceM = centroid
       ? approximateDistanceM(targetLat, targetLon, centroid.lat, centroid.lon)
